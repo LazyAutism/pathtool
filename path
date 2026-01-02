@@ -1,0 +1,169 @@
+--====================================================
+-- SETTINGS
+--====================================================
+
+-- Valid colors:
+-- Black, White, Red, Crimson, Green, Blue, Yellow,
+-- Orange, Purple, Cyan, Pink, Gold
+local chosenColorName = "Black"
+
+local neon = false       -- Neon material, no transparency
+local ballpath = false  -- Spheres instead of rectangles
+
+--====================================================
+-- COLOR DEFINITIONS
+--====================================================
+
+local Colors = {
+	Black   = Color3.fromRGB(0,0,0),
+	White   = Color3.fromRGB(255,255,255),
+	Red     = Color3.fromRGB(255,0,0),
+	Crimson = Color3.fromRGB(150,0,0),
+	Green   = Color3.fromRGB(0,255,0),
+	Blue    = Color3.fromRGB(0,0,255),
+	Yellow  = Color3.fromRGB(255,255,0),
+	Orange  = Color3.fromRGB(255,140,0),
+	Purple  = Color3.fromRGB(170,0,255),
+	Cyan    = Color3.fromRGB(0,255,255),
+	Pink    = Color3.fromRGB(255,105,180),
+	Gold    = Color3.fromRGB(255,215,0),
+}
+
+--====================================================
+-- SAFE COLOR VALIDATION
+--====================================================
+
+if not Colors[chosenColorName] then
+	warn("choose a color from the selection or add your own, don't just put random stuff here.")
+	chosenColorName = "Black"
+end
+
+--====================================================
+-- SERVICES
+--====================================================
+
+local Players = game:GetService("Players")
+local Debris = game:GetService("Debris")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local mouse = player:GetMouse()
+
+--====================================================
+-- TOOL CREATION
+--====================================================
+
+local tool = Instance.new("Tool")
+tool.RequiresHandle = false
+tool.Name = (neon and "Neon" or "") .. chosenColorName .. "Path"
+tool.Parent = player.Backpack
+
+--====================================================
+-- PART SETTINGS
+--====================================================
+
+-- LONG AXIS MUST BE Z (narrow end faces cursor)
+local rectSize = Vector3.new(4, 2, 8)
+
+local ballRadius = 2
+local lifetime = 10
+local interval = 0.06
+
+--====================================================
+-- PLACEMENT LOGIC
+--====================================================
+
+local placing = false
+local lastPlace = 0
+
+local function getLegHeight(character)
+	local leg =
+		character:FindFirstChild("Left Leg") or
+		character:FindFirstChild("LeftLowerLeg")
+
+	return leg and leg.Size.Y or 0
+end
+
+local function placePath()
+	local char = player.Character
+	if not char then return end
+
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+
+	-- FEET POSITION (LEG-BASED)
+	local legHeight = getLegHeight(char)
+
+	local feetY =
+		hrp.Position.Y
+		- (hrp.Size.Y / 2)
+		- legHeight
+
+	local yOffset = ballpath and ballRadius or (rectSize.Y / 2)
+
+	local basePosition = Vector3.new(
+		hrp.Position.X,
+		feetY - yOffset,
+		hrp.Position.Z
+	)
+
+	local target = mouse.Hit.Position
+	local direction = target - basePosition
+	if direction.Magnitude == 0 then return end
+
+	local part = Instance.new("Part")
+	part.Anchored = true
+	part.CanCollide = true
+
+	if ballpath then
+		part.Shape = Enum.PartType.Ball
+		part.Size = Vector3.new(ballRadius*2, ballRadius*2, ballRadius*2)
+	else
+		part.Shape = Enum.PartType.Block
+		part.Size = rectSize
+	end
+
+	-- COLOR & MATERIAL
+	part.Color = Colors[chosenColorName]
+
+	if chosenColorName == "Gold" then
+		part.Material = Enum.Material.Metal
+		part.Reflectance = 0.4
+		part.Transparency = 0
+	elseif neon then
+		part.Material = Enum.Material.Neon
+		part.Transparency = 0
+	else
+		part.Material = Enum.Material.SmoothPlastic
+		part.Transparency = 0.5
+	end
+
+	-- CLEAN ROTATION (NO WEIRDNESS)
+	part.CFrame = CFrame.lookAt(
+		basePosition,
+		basePosition + direction,
+		Vector3.new(0, 1, 0)
+	)
+
+	part.Parent = workspace
+	Debris:AddItem(part, lifetime)
+end
+
+--====================================================
+-- INPUT HANDLING
+--====================================================
+
+tool.Activated:Connect(function()
+	placing = true
+end)
+
+tool.Deactivated:Connect(function()
+	placing = false
+end)
+
+RunService.RenderStepped:Connect(function()
+	if placing and tick() - lastPlace >= interval then
+		lastPlace = tick()
+		placePath()
+	end
+end)
