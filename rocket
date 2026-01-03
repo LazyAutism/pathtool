@@ -1,0 +1,195 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+
+local player = Players.LocalPlayer
+local mouse = player:GetMouse()
+
+-- SPEEDS: Normal, Super, Hyper, Overclock
+local SPEEDS = {60, 120, 240, 480} 
+local TURN_SPEED = 5
+local ACCELERATION = 5
+
+local SPEED_NAMES = {"Normal","Super","Hyper","OVERCLOCK"}
+
+local tool = Instance.new("Tool")
+tool.Name = "HumanRocket"
+tool.RequiresHandle = false
+tool.ToolTip = "Check console!"
+tool.Parent = player.Backpack
+
+local boosting = false
+local speedMode = 1
+local oldGravity
+local boostConn
+local fire
+local printed = false
+local currentVelocity = Vector3.new(0,0,0)
+local rocketAnimTrack
+
+local function createFire(parent, color, rate)
+	local attachment = Instance.new("Attachment")
+	attachment.Position = Vector3.new(0,-3,0) -- 3 studs below parent
+	attachment.Parent = parent
+
+	local p = Instance.new("ParticleEmitter")
+	p.Color = ColorSequence.new(color)
+	p.Rate = rate
+	p.Lifetime = NumberRange.new(0.35)
+	p.Speed = NumberRange.new(30)
+	p.SpreadAngle = Vector2.new(15, 15)
+	p.Parent = attachment
+	return p
+end
+
+local function setLegs(char, visible)
+	for _, part in ipairs(char:GetDescendants()) do
+		if part:IsA("BasePart") and part.Name:lower():find("leg") then
+			part.Transparency = visible and 0 or 1
+		end
+	end
+end
+
+local function tiltArms(char, on)
+	for _, m in ipairs(char:GetDescendants()) do
+		if m:IsA("Motor6D") and m.Name:find("Shoulder") then
+			m.Transform = on and CFrame.Angles(-math.rad(60),0,0) or CFrame.new()
+		end
+	end
+end
+
+local function playRocketAnim(char)
+	local humanoid = char:FindFirstChild("Humanoid")
+	if humanoid then
+		local anim = Instance.new("Animation")
+		anim.AnimationId = "rbxassetid://282574440"
+		rocketAnimTrack = humanoid:LoadAnimation(anim)
+		rocketAnimTrack.Priority = Enum.AnimationPriority.Action
+		rocketAnimTrack:Play()
+	end
+end
+
+local function stopRocketAnim()
+	if rocketAnimTrack then
+		rocketAnimTrack:Stop()
+		rocketAnimTrack = nil
+	end
+end
+
+local function startBoost()
+	local char = player.Character
+	if not char then return end
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	local hum = char:FindFirstChild("Humanoid")
+	if not hrp or not hum then return end
+
+	oldGravity = Workspace.Gravity
+	Workspace.Gravity = 0
+
+	setLegs(char,false)
+	tiltArms(char,true)
+	hum.PlatformStand = true
+
+	hrp.AssemblyAngularVelocity = Vector3.new(0,0,0)
+
+	playRocketAnim(char)
+
+	-- Particle setup depending on speedMode
+	local color = Color3.fromRGB(255,140,0)
+	local rate = 200
+	if speedMode == 2 then
+		color = Color3.fromRGB(0,170,255)
+	elseif speedMode == 3 then
+		color = Color3.fromRGB(255,0,0)
+		rate = 600
+	elseif speedMode == 4 then
+		color = Color3.fromRGB(180,0,255)
+		rate = 800
+	end
+
+	fire = createFire(char:FindFirstChild("LowerTorso") or hrp, color, rate)
+
+	boostConn = RunService.RenderStepped:Connect(function(dt)
+		local origin = hrp.Position
+		local targetPos = mouse.Hit.Position
+		local dir = targetPos - origin
+		if dir.Magnitude == 0 then return end
+
+		-- Smoothly rotate HRP to look at cursor
+		local targetCF = CFrame.lookAt(origin, origin + dir, Vector3.yAxis)
+		hrp.CFrame = hrp.CFrame:Lerp(targetCF, math.clamp(TURN_SPEED*dt,0,1))
+
+		-- Stop angular rotation due to collisions
+		hrp.AssemblyAngularVelocity = Vector3.new(0,0,0)
+
+		-- Smooth velocity along LookVector
+		local targetVelocity = hrp.CFrame.LookVector * SPEEDS[speedMode]
+		currentVelocity = currentVelocity:Lerp(targetVelocity, math.clamp(ACCELERATION*dt,0,1))
+		hrp.AssemblyLinearVelocity = currentVelocity
+	end)
+end
+
+local function stopBoost()
+	local char = player.Character
+	if not char then return end
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	local hum = char:FindFirstChild("Humanoid")
+	if not hrp or not hum then return end
+
+	if boostConn then
+		boostConn:Disconnect()
+		boostConn = nil
+	end
+
+	Workspace.Gravity = oldGravity or Workspace.Gravity
+	setLegs(char,true)
+	tiltArms(char,false)
+
+	-- Stop angular rotation but preserve velocity
+	hrp.AssemblyAngularVelocity = Vector3.new(0,0,0)
+
+	-- Stop animation
+	stopRocketAnim()
+
+	-- Remove fire effect
+	if fire then
+		fire.Parent:Destroy() -- destroy attachment + emitter
+		fire = nil
+	end
+
+	-- Prevent FallingDown briefly and restore PlatformStand
+	hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+	task.delay(0.5, function()
+		if hum then
+			hum.PlatformStand = false
+		end
+	end)
+end
+
+tool.Equipped:Connect(function()
+	if printed then return end
+	printed = true
+	print("=== HUMAN ROCKET CONTROLS ===")
+	print("Hold Mouse1 : Boost")
+	print("Q : Speed Mode (Normal / Super / Hyper / OVERCLOCK)")
+	print("============================")
+end)
+
+tool.Activated:Connect(function()
+	if boosting then return end
+	boosting = true
+	startBoost()
+end)
+
+tool.Deactivated:Connect(function()
+	boosting = false
+	stopBoost()
+end)
+
+UserInputService.InputBegan:Connect(function(input, gp)
+	if gp then return end
+	if input.KeyCode == Enum.KeyCode.Q then
+		speedMode = speedMode % 4 + 1
+	end
+end)
